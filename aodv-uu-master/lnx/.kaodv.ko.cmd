@@ -1,1 +1,0 @@
-cmd_/root/aodv-uu-master/lnx/kaodv.ko := ld -r -m elf_x86_64 -T /usr/src/linux-headers-3.14-kali1-common/scripts/module-common.lds --build-id  -o /root/aodv-uu-master/lnx/kaodv.ko /root/aodv-uu-master/lnx/kaodv.o /root/aodv-uu-master/lnx/kaodv.mod.o
