@@ -1,0 +1,1 @@
+cmd_/root/aodv-uu-master/lnx/kaodv.o := ld -m elf_x86_64   -r -o /root/aodv-uu-master/lnx/kaodv.o /root/aodv-uu-master/lnx/kaodv-mod.o /root/aodv-uu-master/lnx/kaodv-debug.o /root/aodv-uu-master/lnx/kaodv-netlink.o /root/aodv-uu-master/lnx/kaodv-queue.o /root/aodv-uu-master/lnx/kaodv-ipenc.o /root/aodv-uu-master/lnx/kaodv-expl.o 
