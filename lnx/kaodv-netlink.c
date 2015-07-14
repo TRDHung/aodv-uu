@@ -29,6 +29,7 @@
 #include <linux/netlink.h>
 #include <linux/version.h>
 
+
 #ifdef KERNEL26
 #include <linux/security.h>
 #endif
@@ -42,7 +43,7 @@
 
 static int peer_pid;
 static struct sock *kaodvnl;
-static DECLARE_MUTEX(kaodvnl_sem);
+static DEFINE_SEMAPHORE(kaodvnl_sem);
 
 /* For 2.4 backwards compatibility */
 #ifndef KERNEL26
@@ -68,14 +69,14 @@ static struct sk_buff *kaodv_netlink_build_msg(int type, void *data, int len)
 		goto nlmsg_failure;
 
 	old_tail = SKB_TAIL_PTR(skb);
-	nlh = NLMSG_PUT(skb, 0, 0, type, size - sizeof(*nlh));
+	nlh = nlmsg_put(skb, 0, 0, type, size - sizeof(*nlh),0);
 
 	m = NLMSG_DATA(nlh);
 
 	memcpy(m, data, len);
 	
 	nlh->nlmsg_len = SKB_TAIL_PTR(skb) - old_tail;
-	NETLINK_CB(skb).pid = 0;  /* from kernel */
+	NETLINK_CB(skb).portid = 0;  /* from kernel */
 	
 	return skb;
 
@@ -236,8 +237,8 @@ static int kaodv_netlink_rcv_nl_event(struct notifier_block *this,
 	struct netlink_notify *n = ptr;
 
 
-	if (event == NETLINK_URELEASE && n->protocol == NETLINK_AODV && n->pid) {
-		if (n->pid == peer_pid) {
+	if (event == NETLINK_URELEASE && n->protocol == NETLINK_AODV && n->portid) {
+		if (n->portid == peer_pid) {
 			peer_pid = 0;
 			kaodv_expl_flush();
 			kaodv_queue_flush();
@@ -342,17 +343,41 @@ static void kaodv_netlink_rcv_sk(struct sock *sk, int len)
 
 int kaodv_netlink_init(void)
 {
+	struct netlink_kernel_cfg cfg = {
+    	.input = kaodv_netlink_rcv_skb,
+		.groups = AODVGRP_MAX,
+	};
+
 	netlink_register_notifier(&kaodv_nl_notifier);
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,14))
-	kaodvnl = netlink_kernel_create(NETLINK_AODV, kaodv_netlink_rcv_sk);
-#elif (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,22))
-	kaodvnl = netlink_kernel_create(NETLINK_AODV, AODVGRP_MAX, kaodv_netlink_rcv_sk, THIS_MODULE);
-#elif (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
-	kaodvnl = netlink_kernel_create(NETLINK_AODV, AODVGRP_MAX, kaodv_netlink_rcv_sk, NULL, THIS_MODULE);
-#else
-	kaodvnl = netlink_kernel_create(&init_net, NETLINK_AODV, AODVGRP_MAX,
-                    kaodv_netlink_rcv_skb, NULL, THIS_MODULE);
-#endif
+	
+	/* 	testing creating netlink with different namespaces 
+		vnoded is the name of the node process in CORE
+		This should not affect netlink creation outside of CORE
+		since the default network namespace init_net is used when
+		no proccess named vnoded is found
+	*/
+
+	/*struct task_struct *task;
+	struct net *net;
+    for_each_process(task)
+    {
+		if(strcmp(task->comm, "vnoded") == 0){
+			printk("FOUND VNODED: %s [%d]\n",task->comm , task->pid);
+			net = task->nsproxy->net_ns;
+			break;
+		}
+    	//printk("TASK: %s [%d]\n",task->comm , task->pid);
+    }
+
+	if(net != current->nsproxy->net_ns){
+		kaodvnl = netlink_kernel_create(&init_net, NETLINK_AODV, &cfg);
+	}
+	else
+		kaodvnl = netlink_kernel_create(net, NETLINK_AODV, &cfg);
+	*/
+
+	kaodvnl = netlink_kernel_create(&init_net, NETLINK_AODV, &cfg);
+
 	if (kaodvnl == NULL) {
 		printk(KERN_ERR "kaodv_netlink: failed to create netlink socket\n");
 		netlink_unregister_notifier(&kaodv_nl_notifier);
@@ -363,7 +388,8 @@ int kaodv_netlink_init(void)
 
 void kaodv_netlink_fini(void)
 {
-	sock_release(kaodvnl->sk_socket);
+	//sock_release(kaodvnl->sk_socket);
+	netlink_kernel_release(kaodvnl);
 	down(&kaodvnl_sem);
 	up(&kaodvnl_sem);
 

@@ -64,7 +64,9 @@ struct kaodv_queue_entry {
 typedef int (*kaodv_queue_cmpfn) (struct kaodv_queue_entry *, unsigned long);
 
 static unsigned int queue_maxlen = KAODV_QUEUE_QMAX_DEFAULT;
-static rwlock_t queue_lock = RW_LOCK_UNLOCKED;
+
+rwlock_t queue_lock;
+DEFINE_RWLOCK(queue_lock);
 static unsigned int queue_total;
 static LIST_HEAD(queue_list);
 
@@ -287,7 +289,7 @@ static int kaodv_queue_get_info(char *buffer, char **start, off_t offset, int le
 	return len;
 }
 #else
-static int kaodv_queue_get_info(char *page, char **start, off_t off, int count,
+/*static int kaodv_queue_get_info(char *page, char **start, off_t off, int count,
                     int *eof, void *data)
 {
 	int len;
@@ -307,9 +309,36 @@ static int kaodv_queue_get_info(char *page, char **start, off_t off, int count,
 	else if (len < 0)
 		len = 0;
 	return len;
+}*/
+ssize_t kaodv_queue_get_info(struct file *file, char __user *buf,
+			 size_t count, loff_t *off){
+	int len;
+	read_lock_bh(&queue_lock);
+
+	//char** start1;
+	//start1 = NULL;
+    len = sprintf(buf,
+		      "Queue length      : %u\n"
+		      "Queue max. length : %u\n", queue_total, queue_maxlen);
+    read_unlock_bh(&queue_lock);
+
+	//*start1 = buf + *off;
+    len -= *off;
+
+	//copy_to_user(buf,buf, count);
+
+    if (len > count)
+        len = count;
+    else if (len < 0)
+        len = 0;
+    return len;
+
+
 }
 #endif
-
+struct file_operations proc_fops1 = {
+read:  kaodv_queue_get_info
+};
 static int init_or_cleanup(int init)
 {
 	int status = -ENOMEM;
@@ -323,7 +352,7 @@ static int init_or_cleanup(int init)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
 	proc = proc_net_create(KAODV_QUEUE_PROC_FS_NAME, 0, kaodv_queue_get_info);
 #else
-	proc = create_proc_read_entry(KAODV_QUEUE_PROC_FS_NAME, 0, init_net.proc_net, kaodv_queue_get_info, NULL);
+	proc = proc_create(KAODV_QUEUE_PROC_FS_NAME, 0, NULL, &proc_fops1);
 #endif
 	if (!proc) {
 	  printk(KERN_ERR "kaodv_queue: failed to create proc entry\n");
@@ -345,7 +374,7 @@ static int init_or_cleanup(int init)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
 	proc_net_remove(KAODV_QUEUE_PROC_FS_NAME);
 #else
-	proc_net_remove(&init_net, KAODV_QUEUE_PROC_FS_NAME);
+	remove_proc_entry(KAODV_QUEUE_PROC_FS_NAME, NULL);
 #endif
 	return status;
 }

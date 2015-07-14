@@ -124,7 +124,7 @@ void kaodv_update_route_timeouts(int hooknum, const struct net_device *dev,
 	}
 }
 
-static unsigned int kaodv_hook(unsigned int hooknum,
+static unsigned int kaodv_hook(const struct nf_hook_ops *ops,
 			       struct sk_buff *skb,
 			       const struct net_device *in,
 			       const struct net_device *out,
@@ -158,7 +158,7 @@ static unsigned int kaodv_hook(unsigned int hooknum,
 #elif (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,0))
 			qual = (skb)->iwq.qual;
 #endif
-			if (qual_th && hooknum == NF_INET_PRE_ROUTING) {
+			if (qual_th && ops->hooknum == NF_INET_PRE_ROUTING) {
 
 				if (qual && qual < qual_th) {
 					pkts_dropped++;
@@ -166,14 +166,14 @@ static unsigned int kaodv_hook(unsigned int hooknum,
 				}
 			}
 #endif /* CONFIG_QUAL_THRESHOLD */
-			if (hooknum == NF_INET_PRE_ROUTING && in)
-				kaodv_update_route_timeouts(hooknum, in, iph);
+			if (ops->hooknum == NF_INET_PRE_ROUTING && in)
+				kaodv_update_route_timeouts(ops->hooknum, in, iph);
 
 			return NF_ACCEPT;
 		}
 	}
 	
-	if (hooknum == NF_INET_PRE_ROUTING)
+	if (ops->hooknum == NF_INET_PRE_ROUTING)
 		res = if_info_from_ifindex(&ifaddr, &bcaddr, in->ifindex);
 	else 
 		res = if_info_from_ifindex(&ifaddr, &bcaddr, out->ifindex);
@@ -190,9 +190,9 @@ static unsigned int kaodv_hook(unsigned int hooknum,
 
        
 	/* Check which hook the packet is on... */
-	switch (hooknum) {
+	switch (ops->hooknum) {
 	case NF_INET_PRE_ROUTING:
-		kaodv_update_route_timeouts(hooknum, in, iph);
+		kaodv_update_route_timeouts(ops->hooknum, in, iph);
 		
 		/* If we are a gateway maybe we need to decapsulate? */
 		if (is_gateway && iph->protocol == IPPROTO_MIPE &&
@@ -242,7 +242,7 @@ static unsigned int kaodv_hook(unsigned int hooknum,
 		} else if (e.flags & KAODV_RT_GW_ENCAP) {
 			/* Make sure that also the virtual Internet
 			 * dest entry is refreshed */
-			kaodv_update_route_timeouts(hooknum, out, iph);
+			kaodv_update_route_timeouts(ops->hooknum, out, iph);
 			
 			skb = ip_pkt_encapsulate(skb, e.nhop);
 			
@@ -253,7 +253,7 @@ static unsigned int kaodv_hook(unsigned int hooknum,
 		}
 		break;
 	case NF_INET_POST_ROUTING:
-		kaodv_update_route_timeouts(hooknum, out, iph);
+		kaodv_update_route_timeouts(ops->hooknum, out, iph);
 	}
 	return NF_ACCEPT;
 }
@@ -289,42 +289,79 @@ module_param_array(ifname, charp, num_parms, 0444);
 module_param_array(ifname, charp, &num_parms, 0444);
 #endif
 module_param(qual_th, int, 0);
-#else
-MODULE_PARM(ifname, "1-" __MODULE_STRING(MAX_INTERFACES) "s");
-MODULE_PARM(qual_th, "i");
 #endif
 
 static struct nf_hook_ops kaodv_ops[] = {
 	{
 	 .hook = kaodv_hook,
-#ifdef KERNEL26
+
 	 .owner = THIS_MODULE,
-#endif
+
 	 .pf = PF_INET,
 	 .hooknum = NF_INET_PRE_ROUTING,
 	 .priority = NF_IP_PRI_FIRST,
 	 },
 	{
 	 .hook = kaodv_hook,
-#ifdef KERNEL26
+
 	 .owner = THIS_MODULE,
-#endif
+
 	 .pf = PF_INET,
 	 .hooknum = NF_INET_LOCAL_OUT,
 	 .priority = NF_IP_PRI_FILTER,
 	 },
 	{
 	 .hook = kaodv_hook,
-#ifdef KERNEL26
+
 	 .owner = THIS_MODULE,
-#endif
+
 	 .pf = PF_INET,
 	 .hooknum = NF_INET_POST_ROUTING,
 	 .priority = NF_IP_PRI_FILTER,
 	 },
 };
 
-static int kaodv_read_proc(char *page, char **start, off_t off, int count,
+
+
+/*int read_proc(struct file *filp,char *buf,size_t count,loff_t *offp ) 
+{
+char *msg;
+int len,temp;
+if(count>temp)
+{
+count=temp;
+}
+temp=temp-count;
+copy_to_user(buf,msg, count);
+if(count==0)
+temp=len;
+   
+return count;
+}*/
+
+ssize_t kaodv_read_proc(struct file *file, char __user *buf,
+			 size_t count, loff_t *off){
+	int len;
+	char** start = NULL;
+    len = sprintf(buf,
+        "qual threshold=%d\npkts dropped=%lu\nlast qual=%d\ngateway_mode=%d\n",
+        qual_th, pkts_dropped, qual, is_gateway);
+    
+	*start = buf + *off;
+    len -= *off;
+
+	//copy_to_user(buf,buf, count);
+
+    if (len > count)
+        len = count;
+    else if (len < 0)
+        len = 0;
+    return len;
+
+
+}
+
+/*static ssize_t kaodv_read_proc(char *page, char **start, off_t off, int count,
                     int *eof, void *data)
 {
     int len;
@@ -340,17 +377,23 @@ static int kaodv_read_proc(char *page, char **start, off_t off, int count,
     else if (len < 0)
         len = 0;
     return len;
-}
+}*/
 
+struct file_operations proc_fops = {
+read:  kaodv_read_proc
+};
 
 static int __init kaodv_init(void)
 {
 	struct net_device *dev = NULL;
 	int i, ret = -ENOMEM;
 
-#ifndef KERNEL26
-	EXPORT_NO_SYMBOLS;
-#endif
+//#ifndef KERNEL26
+	//EXPORT_NO_SYMBOLS;
+//#endif
+	
+
+	printk("\n\nMODULE INIT\n\n");
 
 	kaodv_expl_init();
 
@@ -395,14 +438,11 @@ static int __init kaodv_init(void)
 
 		dev_put(dev);
 	}
-	
-#if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
-	proc_net_create("kaodv", 0, kaodv_proc_info);
-#else
-    if (!create_proc_read_entry("kaodv", 0, init_net.proc_net, kaodv_read_proc,
-                            NULL))
+
+
+	 if (!proc_create("kaodv", 0, NULL, &proc_fops))
         KAODV_DEBUG("Could not create kaodv proc entry");
-#endif
+
 	KAODV_DEBUG("Module init OK");
 
 	return ret;
@@ -433,7 +473,7 @@ static void __exit kaodv_exit(void)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24))
 	proc_net_remove("kaodv");
 #else
-	proc_net_remove(&init_net, "kaodv");
+	remove_proc_entry("kaodv",NULL);
 #endif
 	kaodv_queue_fini();
 	kaodv_expl_fini();
