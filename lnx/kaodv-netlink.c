@@ -42,7 +42,7 @@
 #include "kaodv.h"
 
 static int peer_pid;
-static struct sock *kaodvnl;
+struct sock** socket_array;
 static DEFINE_SEMAPHORE(kaodvnl_sem);
 
 /* For 2.4 backwards compatibility */
@@ -100,7 +100,10 @@ void kaodv_netlink_send_debug_msg(char *buf, int len)
 		return;
 	}
 
-	netlink_broadcast(kaodvnl, skb, peer_pid, AODVGRP_NOTIFY, GFP_USER);
+	//netlink_broadcast(kaodvnl, skb, peer_pid, AODVGRP_NOTIFY, GFP_USER);
+
+
+	
 }
 
 void kaodv_netlink_send_rt_msg(int type, __u32 src, __u32 dest)
@@ -121,7 +124,8 @@ void kaodv_netlink_send_rt_msg(int type, __u32 src, __u32 dest)
 	}
 
 /* 	netlink_unicast(kaodvnl, skb, peer_pid, MSG_DONTWAIT); */
-	netlink_broadcast(kaodvnl, skb, 0, AODVGRP_NOTIFY, GFP_USER);
+//	netlink_broadcast(kaodvnl, skb, 0, AODVGRP_NOTIFY, GFP_USER);
+
 }
 
 void kaodv_netlink_send_rt_update_msg(int type, __u32 src, __u32 dest,
@@ -145,7 +149,8 @@ void kaodv_netlink_send_rt_update_msg(int type, __u32 src, __u32 dest,
 		return;
 	}
 	/* netlink_unicast(kaodvnl, skb, peer_pid, MSG_DONTWAIT); */
-	netlink_broadcast(kaodvnl, skb, 0, AODVGRP_NOTIFY, GFP_USER);
+	//netlink_broadcast(kaodvnl, skb, 0, AODVGRP_NOTIFY, GFP_USER);
+
 }
 
 void kaodv_netlink_send_rerr_msg(int type, __u32 src, __u32 dest, int ifindex)
@@ -168,7 +173,8 @@ void kaodv_netlink_send_rerr_msg(int type, __u32 src, __u32 dest, int ifindex)
 		return;
 	}
 	/* netlink_unicast(kaodvnl, skb, peer_pid, MSG_DONTWAIT); */
-	netlink_broadcast(kaodvnl, skb, 0, AODVGRP_NOTIFY, GFP_USER);
+	//netlink_broadcast(kaodvnl, skb, 0, AODVGRP_NOTIFY, GFP_USER);
+
 }
 
 static int kaodv_netlink_receive_peer(unsigned char type, void *msg,
@@ -340,8 +346,8 @@ static void kaodv_netlink_rcv_sk(struct sock *sk, int len)
 	return;
 }
 #endif
-
-int kaodv_netlink_init(void)
+	int process_counter = 0;
+int kaodv_netlink_init()
 {
 	struct netlink_kernel_cfg cfg = {
     	.input = kaodv_netlink_rcv_skb,
@@ -357,41 +363,61 @@ int kaodv_netlink_init(void)
 		no proccess named vnoded is found
 	*/
 
-	/*struct task_struct *task;
-	struct net *net;
-    for_each_process(task)
-    {
+	struct task_struct *task;
+	struct net *net = &init_net;
+
+    	for_each_process(task)
+    	{
 		if(strcmp(task->comm, "vnoded") == 0){
+			process_counter++;
 			printk("FOUND VNODED: %s [%d]\n",task->comm , task->pid);
-			net = task->nsproxy->net_ns;
-			break;
 		}
-    	//printk("TASK: %s [%d]\n",task->comm , task->pid);
-    }
-
-	if(net != current->nsproxy->net_ns){
-		kaodvnl = netlink_kernel_create(&init_net, NETLINK_AODV, &cfg);
+    		//printk("TASK: %s [%d]\n",task->comm , task->pid);
+    	}
+    	printk("\nNUMBER OF PROCESSES: %d\n", process_counter);
+	if(process_counter >= 1){
+		socket_array = kmalloc(process_counter * sizeof(struct sock*),GFP_ATOMIC);
+		process_counter = 0;
+		for_each_process(task)
+    		{
+			if(strcmp(task->comm, "vnoded") == 0){
+				printk("FOUND VNODED: %s [%d]\n",task->comm , task->pid);
+				net = task->nsproxy->net_ns;
+				socket_array[process_counter] = netlink_kernel_create(net, NETLINK_AODV, &cfg);
+				process_counter++;
+			}
+    			//printk("TASK: %s [%d]\n",task->comm , task->pid);
+    		}
+	}else{
+		socket_array = kmalloc(sizeof(struct sock*),GFP_ATOMIC);
+		socket_array[process_counter] = netlink_kernel_create(&init_net, NETLINK_AODV, &cfg);
 	}
-	else
-		kaodvnl = netlink_kernel_create(net, NETLINK_AODV, &cfg);
-	*/
+	
+	
 
-	kaodvnl = netlink_kernel_create(&init_net, NETLINK_AODV, &cfg);
-
-	if (kaodvnl == NULL) {
-		printk(KERN_ERR "kaodv_netlink: failed to create netlink socket\n");
-		netlink_unregister_notifier(&kaodv_nl_notifier);
-		return -1;
-	}
+	//if (kaodvnl == NULL) {
+	//	printk(KERN_ERR "kaodv_netlink: failed to create netlink socket\n");
+	//	netlink_unregister_notifier(&kaodv_nl_notifier);
+	//	return -1;
+	//}
 	return 0;
 }
 
 void kaodv_netlink_fini(void)
 {
 	//sock_release(kaodvnl->sk_socket);
-	netlink_kernel_release(kaodvnl);
+	if(process_counter >= 1){
+		int count = 0;
+		for(count = 0; count < process_counter; count++){
+			netlink_kernel_release(socket_array[count]);
+		}
+	}else{
+		netlink_kernel_release(socket_array[process_counter]);
+	}
+
 	down(&kaodvnl_sem);
 	up(&kaodvnl_sem);
 
 	netlink_unregister_notifier(&kaodv_nl_notifier);
+	kfree(socket_array);
 }
