@@ -105,7 +105,8 @@ struct sk_buff *ip_pkt_encapsulate(struct sk_buff *skb, __u32 dest)
 
     if (iph->id == 0)
 	    //ip_select_ident(iph, skb_dst(skb), NULL);
-	    __ip_select_ident(iph, skb_dst(skb), 0);
+	    //__ip_select_ident(iph, skb_dst(skb), 0);
+	    ip_select_ident(skb, NULL);
         
     return skb;
 }
